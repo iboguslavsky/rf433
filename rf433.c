@@ -7,6 +7,9 @@
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/kdev_t.h>		// MKDEV definition
+#include <linux/hrtimer.h>
+#include <linux/ktime.h>
+#include <linux/kernel.h>
 #include <asm/io.h>
  
 MODULE_LICENSE("GPL");
@@ -47,14 +50,18 @@ struct rf433_channel {
   union packet pkt;
   unsigned int use_count;
 
+  __u8 bitstring[48]; // 12 bits * 4 transitions each; will turn into real bit string at some point
+  __u8 waveformpart;
+
   __u32 ctrl_reg, pullup_reg;
 
   void __iomem *datareg;
 };
 
-// Define baud (1.25ms)
-#define TICK 1.25
-#define MS_TO_NS(x) (x * 1E6L)
+// In nanoseconds
+#define NARROW 175000
+#define WIDE 525000
+#define INTERVAL(x) ((x == 0) ? NARROW : WIDE)
 
 static ssize_t rf433_address_show (struct device *dev,struct device_attribute *attr, char *buf);
 static ssize_t rf433_command_show (struct device *dev,struct device_attribute *attr, char *buf);
@@ -85,6 +92,9 @@ static const struct attribute_group rf433_attr_group = {
 
 struct device *rf433;
 static struct rf433_channel channel;
+static struct hrtimer hr_timer;
+
+enum hrtimer_restart waveform_hrtimer_callback (struct hrtimer *timer);
 
 static int __init rf433_init (void) {
 int ret;
@@ -232,19 +242,63 @@ char buffer[13];
 
 static ssize_t rf433_send_store (struct device *dev, struct device_attribute *attr, const char *buf, size_t size) {
 struct rf433_channel *channel = dev_get_drvdata (dev);
+ktime_t ktime;
 char buffer[13];
 __u16 action;
+__u8 i, j;
+__u32 reg;
 
   // Successful sscanf?
   if (sscanf (buf, "%hu", &action)) {
 
     // process the packet
-    if (action > 1) {
+    if (action > 0) {
 
       strncpy (buffer, channel -> pkt.packet, 12);
       buffer[sizeof(buffer) - 1] = '\0';
 
       printk(KERN_INFO "[%s] Sending [%s]\n", rf433_class.name, buffer);
+
+      for (i = 0; i < 12; i++) {
+
+	j = 0;
+        switch (buffer[i]) {
+	  case '0':
+	 	channel -> bitstring[i * 4 + j++] = 0; // 0 is a narrow interval, 1 - wide interval
+	 	channel -> bitstring[i * 4 + j++] = 1;
+	 	channel -> bitstring[i * 4 + j++] = 0;
+	 	channel -> bitstring[i * 4 + j]   = 1;
+		break;
+	  case '1':
+	 	channel -> bitstring[i * 4 + j++] = 1;
+	 	channel -> bitstring[i * 4 + j++] = 0;
+	 	channel -> bitstring[i * 4 + j++] = 1;
+	 	channel -> bitstring[i * 4 + j]   = 0;
+		break;
+	  case 'f':
+	  case 'F':
+	 	channel -> bitstring[i * 4 + j++] = 0;
+	 	channel -> bitstring[i * 4 + j++] = 1;
+	 	channel -> bitstring[i * 4 + j++] = 1;
+	 	channel -> bitstring[i * 4 + j]   = 0;
+		break;
+	}
+      }
+
+      // Start timer
+      ktime = ktime_set (0, INTERVAL(channel -> bitstring[0]));
+      hrtimer_init (&hr_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+      hr_timer.function = &waveform_hrtimer_callback;
+
+      channel -> waveformpart = 0;
+
+      // Set out bit high 
+      reg = ioread32 (channel -> datareg);
+      reg |= (1 << 0x06);      
+      iowrite32 (reg, channel -> datareg);
+
+      hrtimer_start (&hr_timer, ktime, HRTIMER_MODE_REL);
+
       return size;
     }
   }
@@ -252,40 +306,28 @@ __u16 action;
   return -EINVAL;
 }
 
-/*
-enum hrtimer_restart effects_hrtimer_callback (struct hrtimer *timer) {
-__u16 restart;
+enum hrtimer_restart waveform_hrtimer_callback (struct hrtimer *timer) {
+// __u16 restart;
+__u32 reg;
 
+  channel.waveformpart++;
 
-  if (channel.effect == EFFECT_ON) {
-
-    channel.active_cycles = 0;
-    restart = HRTIMER_NORESTART;
+  if (channel.waveformpart == sizeof (channel.bitstring)) {
+    // send sync bit
   }
-  else (channel.effect == EFFECT_ATTACK) {
+  else {
 
-    channel.cycles.s.active_cycles += direction;
-    hrtimer_forward (timer, ktime_get (), ktime_set (0, MS_TO_NS(TICK));
+    // Flip out bit 
+    reg = ioread32 (channel.datareg);
+    reg ^= (1 << 0x06);
+    iowrite32 (reg, channel.datareg);
 
-    restart = (channel.cycles.s.active_cycles == 256) ? HRTIMER_NORESTART : HRTIMER_RESTART;
-  }
-  else (channel.effect == EFFECT_FADE) {
-
-    channel.cycles.s.active_cycles += direction;
-    hrtimer_forward (timer, ktime_get (), ktime_set (0, MS_TO_NS(TICK));
-
-    restart = (channel.cycles.s.active_cycles == 0) ? HRTIMER_NORESTART : HRTIMER_RESTART;
-  }
-  else (channel.effect == EFFECT_FULLCYCLE) {
-
-    hrtimer_forward (timer, ktime_get (), ktime_set (0, MS_TO_NS(TICK));
-    restart = HRTIMER_RESTART;
+    hrtimer_forward (timer, ktime_get (), ktime_set (0, INTERVAL(channel.bitstring[channel.waveformpart])));
+    return HRTIMER_RESTART;
   }
 
-  iowrite32 (channel.cycles.initializer, channel.period_reg_addr);
-  return restart;
+  return HRTIMER_NORESTART;
 }
-*/
 
 module_init(rf433_init);
 module_exit(rf433_exit);
