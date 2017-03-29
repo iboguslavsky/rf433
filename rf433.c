@@ -298,6 +298,7 @@ __u32 reg;
       iowrite32 (reg, channel -> datareg);
 
       hrtimer_start (&hr_timer, ktime, HRTIMER_MODE_REL);
+      printk(KERN_INFO "[%s] [part #%d]: %d\n", rf433_class.name, channel -> waveformpart, channel -> bitstring[channel -> waveformpart]);
 
       return size;
     }
@@ -314,6 +315,9 @@ __u32 reg;
 
   if (channel.waveformpart == sizeof (channel.bitstring)) {
     // send sync bit
+    printk(KERN_INFO "[%s] DONE\n", rf433_class.name);
+
+    return HRTIMER_NORESTART;
   }
   else {
 
@@ -323,6 +327,8 @@ __u32 reg;
     iowrite32 (reg, channel.datareg);
 
     hrtimer_forward (timer, ktime_get (), ktime_set (0, INTERVAL(channel.bitstring[channel.waveformpart])));
+
+    printk(KERN_INFO "[%s] [part #%d]: %d\n", rf433_class.name, channel.waveformpart, channel.bitstring[channel.waveformpart]);
     return HRTIMER_RESTART;
   }
 
