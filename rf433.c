@@ -61,6 +61,8 @@ struct rf433_channel {
 // In nanoseconds
 #define NARROW 175000
 #define WIDE 525000
+#define SYNC (30 * NARROW)
+
 #define INTERVAL(x) ((x == 0) ? NARROW : WIDE)
 
 static ssize_t rf433_address_show (struct device *dev,struct device_attribute *attr, char *buf);
@@ -311,20 +313,32 @@ enum hrtimer_restart waveform_hrtimer_callback (struct hrtimer *timer) {
 // __u16 restart;
 __u32 reg;
 
+  // Flip out bit 
+  reg = ioread32 (channel.datareg);
+  reg ^= (1 << 0x06);
+  iowrite32 (reg, channel.datareg);
+
   channel.waveformpart++;
 
-  if (channel.waveformpart == sizeof (channel.bitstring)) {
-    // send sync bit
+  if (channel.waveformpart > sizeof (channel.bitstring)) {
+
+    hrtimer_forward (timer, ktime_get (), ktime_set (0, SYNC));
+
     printk(KERN_INFO "[%s] DONE\n", rf433_class.name);
 
     return HRTIMER_NORESTART;
   }
-  else {
+  else
+  if (channel.waveformpart == sizeof (channel.bitstring)) {
 
-    // Flip out bit 
-    reg = ioread32 (channel.datareg);
-    reg ^= (1 << 0x06);
-    iowrite32 (reg, channel.datareg);
+    // send sync bit
+    hrtimer_forward (timer, ktime_get (), ktime_set (0, INTERVAL(0)));
+
+    printk(KERN_INFO "[%s] [part #%d]: %d\n", rf433_class.name, channel.waveformpart, 0);
+
+    return HRTIMER_RESTART;
+  }
+  else {
 
     hrtimer_forward (timer, ktime_get (), ktime_set (0, INTERVAL(channel.bitstring[channel.waveformpart])));
 
