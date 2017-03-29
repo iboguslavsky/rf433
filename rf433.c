@@ -231,14 +231,22 @@ char buffer[13];
 }
 
 static ssize_t rf433_send_store (struct device *dev, struct device_attribute *attr, const char *buf, size_t size) {
-// struct rf433_channel *channel = dev_get_drvdata (dev);
+struct rf433_channel *channel = dev_get_drvdata (dev);
+char buffer[13];
 __u16 action;
 
   // Successful sscanf?
   if (sscanf (buf, "%hu", &action)) {
 
     // process the packet
-    return size;
+    if (action > 1) {
+
+      strncpy (buffer, channel -> pkt.packet, 12);
+      buffer[sizeof(buffer) - 1] = '\0';
+
+      printk(KERN_INFO "[%s] Sending [%s]\n", rf433_class.name, buffer);
+      return size;
+    }
   }
 
   return -EINVAL;
