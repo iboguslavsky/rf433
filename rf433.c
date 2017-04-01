@@ -50,17 +50,21 @@ struct rf433_channel {
   union packet pkt;
   unsigned int use_count;
 
-  __u8 bitstring[48]; // 12 bits * 4 transitions each; will turn into real bit string at some point
+  __u8 bitstring[49]; // 12 bits * 4 transitions each + 1 stop bit (narrow) transition; will turn into real bit string at some point
   __u8 waveformpart;
+  __u8 packets;
 
   __u32 ctrl_reg, pullup_reg;
 
   void __iomem *datareg;
 };
 
-// In nanoseconds
-#define NARROW 175000
-#define WIDE 525000
+// Number of packets in the frame
+#define MAX_PACKETS 10 
+
+// Transition width nanoseconds
+#define NARROW 180000
+#define WIDE (3 * NARROW)
 #define SYNC (30 * NARROW)
 
 #define INTERVAL(x) ((x == 0) ? NARROW : WIDE)
@@ -287,11 +291,16 @@ __u32 reg;
 	}
       }
 
+      // Finish the packet with sync bit (first half; narrow interval)
+      channel -> bitstring[48] = 0;
+
       // Start timer
       ktime = ktime_set (0, INTERVAL(channel -> bitstring[0]));
       hrtimer_init (&hr_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
       hr_timer.function = &waveform_hrtimer_callback;
 
+      // New fra,e of MAX_PACKETS packets
+      channel -> packets = 0;
       channel -> waveformpart = 0;
 
       // Set out bit high 
@@ -313,7 +322,7 @@ enum hrtimer_restart waveform_hrtimer_callback (struct hrtimer *timer) {
 // __u16 restart;
 __u32 reg;
 
-  // Flip out bit 
+  // Flip output bit  (Manchester encoding - every tramsition is a flip of the bit)
   reg = ioread32 (channel.datareg);
   reg ^= (1 << 0x06);
   iowrite32 (reg, channel.datareg);
@@ -322,19 +331,38 @@ __u32 reg;
 
   if (channel.waveformpart > sizeof (channel.bitstring)) {
 
-    hrtimer_forward (timer, ktime_get (), ktime_set (0, SYNC));
+    printk(KERN_INFO "[%s] PACKET #%d is DONE\n", rf433_class.name, channel.packets++);
 
-    printk(KERN_INFO "[%s] DONE\n", rf433_class.name);
+    // Frame is completed
+    if (channel.packets == MAX_PACKETS) {
 
-    return HRTIMER_NORESTART;
+      // Turn the radio off
+      reg = ioread32 (channel.datareg);
+      reg &= ~(1 << 0x06);      
+      iowrite32 (reg, channel.datareg);
+
+      return HRTIMER_NORESTART;
+    }
+
+    // Repeat the packet up to MAX_PACKETS
+    channel.waveformpart = 0;
+
+    // Set out bit high 
+    reg = ioread32 (channel.datareg);
+    reg |= (1 << 0x06);      
+    iowrite32 (reg, channel.datareg);
+
+    hrtimer_forward (timer, ktime_get (), ktime_set (0, INTERVAL(channel.bitstring[0])));
+
+    return HRTIMER_RESTART;
   }
   else
   if (channel.waveformpart == sizeof (channel.bitstring)) {
 
     // send sync bit
-    hrtimer_forward (timer, ktime_get (), ktime_set (0, INTERVAL(0)));
+    hrtimer_forward (timer, ktime_get (), ktime_set (0, SYNC));
 
-    printk(KERN_INFO "[%s] [part #%d]: %d\n", rf433_class.name, channel.waveformpart, 0);
+    // printk(KERN_INFO "[%s] [part #%d]: %d\n", rf433_class.name, channel.waveformpart, 0);
 
     return HRTIMER_RESTART;
   }
