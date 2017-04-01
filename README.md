@@ -1,4 +1,4 @@
-Linux Loadable Kernel Module to control 433MHz transmitter. Uses High Resolution kernel timer to provide accurate timing for the generated waveforms. Tested successfully to work with Ltecity power outlets. Takes arbitrary frame (address + command)
+Linux Loadable Kernel Module to control 433MHz transmitter. Uses High Resolution kernel timer to provide accurate timing for the generated waveforms. Tested successfully to work with Etekcity power outlets. Takes arbitrary frame (address + command)
 
 <pre>
 > git clone https://github.com/iboguslavsky/rf433.git
@@ -17,4 +17,4 @@ After the module loads:
 
 This sends command "00f0fff10001" (address: 00f0fff1, command: 0001).
 
-You can supply the address and command separately via ./address and ./command files
+You can supply the address and command separately via ./address and ./command files in the same directory.
