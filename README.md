@@ -1,4 +1,6 @@
-Linux Loadable Kernel Module to control 433MHz transmitter. Uses High Resolution kernel timer to provide accurate timing for the generated waveforms. Tested successfully to work with Etekcity power outlets. Takes arbitrary frame (address + command)
+Linux Loadable Kernel Module to control 433MHz transmitter. Uses High Resolution kernel timer to provide accurate timing for the generated waveforms. Tested successfully to work with Etekcity power outlets. Takes arbitrary frame (or address + command).
+
+**Works with Orange Pi Zero (Uses PG06 / UART1_TX pin on 26-pin connector). Tested under Legacy Kernel only (3.4.X).**
 
 <pre>
 > git clone https://github.com/iboguslavsky/rf433.git
