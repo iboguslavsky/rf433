@@ -2,6 +2,12 @@ Linux Loadable Kernel Module to control 433MHz transmitter. Uses High Resolution
 
 **Works with Orange Pi Zero (Uses PG06 / UART1_TX pin on 26-pin connector). Tested under Legacy Kernel only (3.4.X).**
 
+Uses PT2272 style bit represenatation and encoding scheme (Manchester) illustrated here:
+
+<img src="https://github.com/iboguslavsky/rf433/blob/master/images/pt2272_encoding1.jpg" width="600">
+
+To compile:
+
 <pre>
 > git clone https://github.com/iboguslavsky/rf433.git
 > cd rf433
