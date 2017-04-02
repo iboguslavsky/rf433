@@ -79,10 +79,10 @@ static ssize_t rf433_command_store (struct device *dev,struct device_attribute *
 static ssize_t rf433_packet_store (struct device *dev,struct device_attribute *attr, const char *buf, size_t size);
 
 // no pulse mode for now; just cycle mode
-static DEVICE_ATTR(send, 0644, NULL, rf433_send_store);
-static DEVICE_ATTR(address, 0644, rf433_address_show, rf433_address_store);
-static DEVICE_ATTR(command, 0644, rf433_command_show, rf433_command_store);
-static DEVICE_ATTR(packet, 0644, rf433_packet_show, rf433_packet_store);
+static DEVICE_ATTR(send, 0666, NULL, rf433_send_store);
+static DEVICE_ATTR(address, 0666, rf433_address_show, rf433_address_store);
+static DEVICE_ATTR(command, 0666, rf433_command_show, rf433_command_store);
+static DEVICE_ATTR(packet, 0666, rf433_packet_show, rf433_packet_store);
 
 static const struct attribute *rf433_attrs[] = {
   &dev_attr_send.attr,
