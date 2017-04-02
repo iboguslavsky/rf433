@@ -12,7 +12,7 @@ Linux Loadable Kernel Module to control 433MHz transmitter. Uses High Resolution
 After the module loads:
 
 <pre>
-> cd cd /sys/class/rf433/rf0
+> cd /sys/class/rf433/rf0
 > echo "00f0fff10001" > packet  # Send command "0001" to address "00f0fff1"
 > echo 1 > send
 </pre>
