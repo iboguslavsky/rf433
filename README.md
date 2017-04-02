@@ -13,14 +13,12 @@ After the module loads:
 
 <pre>
 > cd cd /sys/class/rf433/rf0
-> echo "00f0fff10001" > packet
+> echo "00f0fff10001" > packet  # Send command "0001" to address "00f0fff1"
 > echo 1 > send
 </pre>
 
-This sends command "00f0fff10001" (address: 00f0fff1, command: 0001).
-
 You can supply the address and command separately via ./address and ./command files in the same directory.
 
-Trasmitter RCT-433-UTR (Mouser P/N: 509-RCT-433-UTR):
+Trasmitter used: RCT-433-UTR (Mouser P/N: 509-RCT-433-UTR):
 
 <img src="https://github.com/iboguslavsky/rf433/blob/master/images/IMG_3643.JPG" width="500">
