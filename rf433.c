@@ -309,7 +309,8 @@ __u32 reg;
       iowrite32 (reg, channel -> datareg);
 
       hrtimer_start (&hr_timer, ktime, HRTIMER_MODE_REL);
-      printk(KERN_INFO "[%s] [part #%d]: %d\n", rf433_class.name, channel -> waveformpart, channel -> bitstring[channel -> waveformpart]);
+
+      // printk(KERN_INFO "[%s] [part #%d]: %d\n", rf433_class.name, channel -> waveformpart, channel -> bitstring[channel -> waveformpart]);
 
       return size;
     }
@@ -331,7 +332,7 @@ __u32 reg;
 
   if (channel.waveformpart > sizeof (channel.bitstring)) {
 
-    printk(KERN_INFO "[%s] PACKET #%d is DONE\n", rf433_class.name, channel.packets++);
+    channel.packets++;
 
     // Frame is completed
     if (channel.packets == MAX_PACKETS) {
@@ -340,6 +341,8 @@ __u32 reg;
       reg = ioread32 (channel.datareg);
       reg &= ~(1 << 0x06);      
       iowrite32 (reg, channel.datareg);
+
+      printk(KERN_INFO "[%s] Command #%d sent\n", rf433_class.name, ++channel.use_count);
 
       return HRTIMER_NORESTART;
     }
@@ -370,7 +373,8 @@ __u32 reg;
 
     hrtimer_forward (timer, ktime_get (), ktime_set (0, INTERVAL(channel.bitstring[channel.waveformpart])));
 
-    printk(KERN_INFO "[%s] [part #%d]: %d\n", rf433_class.name, channel.waveformpart, channel.bitstring[channel.waveformpart]);
+    // printk(KERN_INFO "[%s] [part #%d]: %d\n", rf433_class.name, channel.waveformpart, channel.bitstring[channel.waveformpart]);
+
     return HRTIMER_RESTART;
   }
 
