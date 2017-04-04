@@ -10,6 +10,7 @@
 #include <linux/hrtimer.h>
 #include <linux/ktime.h>
 #include <linux/kernel.h>
+#include <linux/mutex.h>
 #include <asm/io.h>
  
 MODULE_LICENSE("GPL");
@@ -102,6 +103,8 @@ static struct hrtimer hr_timer;
 
 enum hrtimer_restart waveform_hrtimer_callback (struct hrtimer *timer);
 
+static DEFINE_MUTEX(rf433_mutex);
+
 static int __init rf433_init (void) {
 int ret;
 __u32 data;
@@ -142,6 +145,8 @@ void __iomem *addr;
   // Map data register to kernel address space and store it
   channel.datareg = ioremap (PORTG_DATA_REG, 4);
 
+  mutex_init (&rf433_mutex);
+
   printk(KERN_INFO "[%s] initialized ok\n", rf433_class.name);
   return ret;
 }
@@ -162,6 +167,8 @@ void __iomem *addr;
 
   device_destroy (&rf433_class, rf433 -> devt);
   class_unregister (&rf433_class);
+
+  mutex_destroy (&rf433_mutex);
 
   printk (KERN_INFO "[%s] exiting\n", rf433_class.name);
 }
@@ -208,6 +215,11 @@ static ssize_t rf433_address_store (struct device *dev, struct device_attribute 
 struct rf433_channel *channel = dev_get_drvdata (dev);
 char buffer[9];
 
+  if (mutex_is_locked (&rf433_mutex)) { // Are we in a middle of sending a command out?
+    printk(KERN_INFO "[%s] rf433 is busy\n", rf433_class.name);
+    return -EBUSY;
+  }
+
   // Successful sscanf?
   if (sscanf (buf, "%8s", buffer)) {
 
@@ -222,6 +234,11 @@ static ssize_t rf433_command_store (struct device *dev, struct device_attribute 
 struct rf433_channel *channel = dev_get_drvdata (dev);
 char buffer[5];
 
+  if (mutex_is_locked (&rf433_mutex)) { // returns 1 if successful and 0 if there is contention
+    printk(KERN_INFO "[%s] rf433 is busy\n", rf433_class.name);
+    return -EBUSY;
+  }
+
   // Successful sscanf?
   if (sscanf (buf, "%4s", buffer)) {
 
@@ -235,6 +252,11 @@ char buffer[5];
 static ssize_t rf433_packet_store (struct device *dev, struct device_attribute *attr, const char *buf, size_t size) {
 struct rf433_channel *channel = dev_get_drvdata (dev);
 char buffer[13];
+
+  if (mutex_is_locked (&rf433_mutex)) { // returns 1 if successful and 0 if there is contention
+    printk(KERN_INFO "[%s] rf433 is busy\n", rf433_class.name);
+    return -EBUSY;
+  }
 
   // Successful sscanf?
   if (sscanf (buf, "%12s", buffer)) {
@@ -253,6 +275,11 @@ char buffer[13];
 __u16 action;
 __u8 i, j;
 __u32 reg;
+
+  if (!mutex_trylock (&rf433_mutex)) { // returns 1 if successful and 0 if there is contention
+    printk(KERN_INFO "[%s] rf433 is busy, bailing\n", rf433_class.name);
+    return -EBUSY;
+  }
 
   // Successful sscanf?
   if (sscanf (buf, "%hu", &action)) {
@@ -343,6 +370,9 @@ __u32 reg;
       iowrite32 (reg, channel.datareg);
 
       printk(KERN_INFO "[%s] Command #%d sent\n", rf433_class.name, ++channel.use_count);
+
+      // release mutex - ready to send again
+      mutex_unlock (&rf433_mutex);
 
       return HRTIMER_NORESTART;
     }
