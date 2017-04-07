@@ -24,13 +24,6 @@ read stop
 # Stop transmitting codeframe
 echo 0 > /sys/class/rf433/rf0/send
 
-echo ${addr} > /sys/class/rf433/rf0/address
-
 # Send "off" command
 echo 10 > /sys/class/rf433/rf0/command
-echo 2 > /sys/class/rf433/rf0/send
-
-echo -n "Push <Enter> when you hear the outlet click again..."
-read stop
-
-echo 0 > /sys/class/rf433/rf0/send
+echo 1 > /sys/class/rf433/rf0/send
