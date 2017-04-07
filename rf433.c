@@ -255,8 +255,10 @@ __u8 i;
   // Successful sscanf?
   if (sscanf (buf, "%s", buffer)) {
 
+    // only 0s and 1s are allowed in the command section of the codeword (as per PT2262 part spec)
+    // use rf433_codeword_store() for arbitrary codewords
     for (i = 0; i < COMMAND_SIZE; i++) 
-      if (buffer[i] != '0' && buffer[i] != '1' && buffer[i] != 'f' && buffer[i] != 'F')
+      if (buffer[i] != '0' && buffer[i] != '1')
         return -EINVAL;
 
     // Copy chars up to COMMAND_SIZE chars
