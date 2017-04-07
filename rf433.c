@@ -53,7 +53,7 @@ struct rf433_channel {
 
   __u8 bitstring[49]; // 12 bits * 4 transitions each + 1 stop bit (narrow) transition; will turn into real bit string at some point
   __u8 waveformpart;
-  __u8 packets;
+  __u16 packets;
 
   __u32 ctrl_reg, pullup_reg;
 
@@ -61,7 +61,8 @@ struct rf433_channel {
 };
 
 // Number of packets in the frame
-#define MAX_PACKETS 10 
+#define NORMAL_PACKETS 10 
+#define MAX_PACKETS 65535 
 
 // Transition width nanoseconds
 #define NARROW 180000
@@ -276,26 +277,44 @@ __u16 action;
 __u8 i, j;
 __u32 reg;
 
-  if (!mutex_trylock (&rf433_mutex)) { // returns 1 if successful and 0 if there is contention
-    printk(KERN_INFO "[%s] rf433 is busy, bailing\n", rf433_class.name);
-    return -EBUSY;
-  }
-
   // Successful sscanf?
   if (sscanf (buf, "%hu", &action)) {
 
+    // Stop the presses asap (do not care for mutex being up)
+    if (!action) {
+
+      // Don't care if it's still running, just cancel (unless it was never initialized)
+      if (hr_timer.start_pid != 0)
+        hrtimer_cancel (&hr_timer);
+
+      // release mutex - ready to send again
+      mutex_unlock (&rf433_mutex);
+
+      // Turn the radio off
+      reg = ioread32 (channel -> datareg);
+      reg &= ~(1 << 0x06);      
+      iowrite32 (reg, channel -> datareg);
+
+      printk(KERN_INFO "[%s] Stopping timer pid: %d\n", rf433_class.name, hr_timer.start_pid);
+
+      return size;
+    }
+
+    if (!mutex_trylock (&rf433_mutex)) { // returns 1 if successful and 0 if there is contention
+      printk(KERN_INFO "[%s] rf433 is busy, bailing\n", rf433_class.name);
+      return -EBUSY;
+    }
+
     // process the packet
-    if (action > 0) {
+    strncpy (buffer, channel -> pkt.packet, 12);
+    buffer[sizeof(buffer) - 1] = '\0';
 
-      strncpy (buffer, channel -> pkt.packet, 12);
-      buffer[sizeof(buffer) - 1] = '\0';
+    printk(KERN_INFO "[%s] Sending [%s]\n", rf433_class.name, buffer);
 
-      printk(KERN_INFO "[%s] Sending [%s]\n", rf433_class.name, buffer);
+    for (i = 0; i < 12; i++) {
 
-      for (i = 0; i < 12; i++) {
-
-	j = 0;
-        switch (buffer[i]) {
+      j = 0;
+      switch (buffer[i]) {
 	  case '0':
 	 	channel -> bitstring[i * 4 + j++] = 0; // 0 is a narrow interval, 1 - wide interval
 	 	channel -> bitstring[i * 4 + j++] = 1;
@@ -315,19 +334,26 @@ __u32 reg;
 	 	channel -> bitstring[i * 4 + j++] = 1;
 	 	channel -> bitstring[i * 4 + j]   = 0;
 		break;
-	}
       }
+    }
 
-      // Finish the packet with sync bit (first half; narrow interval)
-      channel -> bitstring[48] = 0;
+    // Finish the packet with sync bit (first half; narrow interval)
+    channel -> bitstring[48] = 0;
+
+    if (action > 0) {
 
       // Start timer
       ktime = ktime_set (0, INTERVAL(channel -> bitstring[0]));
       hrtimer_init (&hr_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
       hr_timer.function = &waveform_hrtimer_callback;
 
-      // New fra,e of MAX_PACKETS packets
-      channel -> packets = 0;
+      if (action == 1) 
+        channel -> packets = NORMAL_PACKETS;
+      
+      // "Infinite" number of packets (continuous send). Useful for re-sync of outlets
+      if (action == 2)
+        channel -> packets = MAX_PACKETS;
+
       channel -> waveformpart = 0;
 
       // Set out bit high 
@@ -341,6 +367,7 @@ __u32 reg;
 
       return size;
     }
+
   }
 
   return -EINVAL;
@@ -359,25 +386,24 @@ __u32 reg;
 
   if (channel.waveformpart > sizeof (channel.bitstring)) {
 
-    channel.packets++;
+    channel.packets--;
 
     // Frame is completed
-    if (channel.packets == MAX_PACKETS) {
+    if (!channel.packets) {
 
       // Turn the radio off
       reg = ioread32 (channel.datareg);
       reg &= ~(1 << 0x06);      
       iowrite32 (reg, channel.datareg);
 
-      printk(KERN_INFO "[%s] Command #%d sent\n", rf433_class.name, ++channel.use_count);
-
       // release mutex - ready to send again
       mutex_unlock (&rf433_mutex);
+
+      printk(KERN_INFO "[%s] Command #%d sent\n", rf433_class.name, ++channel.use_count);
 
       return HRTIMER_NORESTART;
     }
 
-    // Repeat the packet up to MAX_PACKETS
     channel.waveformpart = 0;
 
     // Set out bit high 
