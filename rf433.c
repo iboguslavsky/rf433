@@ -16,7 +16,7 @@
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Igor Boguslavsky");
 MODULE_DESCRIPTION("RF Remote Control driver for Orange Pi Zero"); 
-MODULE_VERSION("0.1");           
+MODULE_VERSION("1.0");           
  
 #define PORTBASE 0x01c20800
 #define PG_CFG0_REG	PORTBASE+0xD8 // Use PG06 / GPIO198 for FSK output
@@ -36,33 +36,38 @@ static struct class rf433_class = {
   .class_attrs =  rf433_class_attrs,
 };
 
-struct packet_parts {
-  char address[8];
-  char command[4];
+// Number of code words in a code frame in the frame
+#define NORMAL_CODEFRAME 10 
+#define ENDLESS_CODEFRAME 65535 
+
+// Etekcity icodeword cosists of 10-bit addresses and 2-bit commands
+#define ADDRESS_SIZE 10
+#define COMMAND_SIZE 2
+
+struct codeword_parts {
+  char address[ADDRESS_SIZE];
+  char command[COMMAND_SIZE];
 };
 
-union packet {
-  struct packet_parts ac;
-  char packet[12];
+union codeword {
+  struct codeword_parts ac;
+  char codeword[ADDRESS_SIZE + COMMAND_SIZE];
 };
 
 struct rf433_channel {
 
-  union packet pkt;
+  union codeword pkt;
   unsigned int use_count;
 
-  __u8 bitstring[49]; // 12 bits * 4 transitions each + 1 stop bit (narrow) transition; will turn into real bit string at some point
-  __u8 waveformpart;
-  __u16 packets;
+  __u8  bitstring[49]; // 12 bits * 4 transitions each + 1 stop bit (narrow) transition; will turn into real bit string at some point
+  __u8  codebits;      // current code bit in a code word
+  __u16 codewords;     // current codeword in a codeframe
 
   __u32 ctrl_reg, pullup_reg;
 
   void __iomem *datareg;
 };
 
-// Number of packets in the frame
-#define NORMAL_PACKETS 10 
-#define MAX_PACKETS 65535 
 
 // Transition width nanoseconds
 #define NARROW 180000
@@ -73,24 +78,24 @@ struct rf433_channel {
 
 static ssize_t rf433_address_show (struct device *dev,struct device_attribute *attr, char *buf);
 static ssize_t rf433_command_show (struct device *dev,struct device_attribute *attr, char *buf);
-static ssize_t rf433_packet_show (struct device *dev,struct device_attribute *attr, char *buf);
+static ssize_t rf433_codeword_show (struct device *dev,struct device_attribute *attr, char *buf);
 
 static ssize_t rf433_send_store (struct device *dev,struct device_attribute *attr, const char *buf, size_t size);
 static ssize_t rf433_address_store (struct device *dev,struct device_attribute *attr, const char *buf, size_t size);
 static ssize_t rf433_command_store (struct device *dev,struct device_attribute *attr, const char *buf, size_t size);
-static ssize_t rf433_packet_store (struct device *dev,struct device_attribute *attr, const char *buf, size_t size);
+static ssize_t rf433_codeword_store (struct device *dev,struct device_attribute *attr, const char *buf, size_t size);
 
 // no pulse mode for now; just cycle mode
 static DEVICE_ATTR(send, 0666, NULL, rf433_send_store);
 static DEVICE_ATTR(address, 0666, rf433_address_show, rf433_address_store);
 static DEVICE_ATTR(command, 0666, rf433_command_show, rf433_command_store);
-static DEVICE_ATTR(packet, 0666, rf433_packet_show, rf433_packet_store);
+static DEVICE_ATTR(codeword, 0666, rf433_codeword_show, rf433_codeword_store);
 
 static const struct attribute *rf433_attrs[] = {
   &dev_attr_send.attr,
   &dev_attr_address.attr,
   &dev_attr_command.attr,
-  &dev_attr_packet.attr,
+  &dev_attr_codeword.attr,
   NULL,
 };
 
@@ -182,7 +187,7 @@ char buffer[9];
 
   const struct rf433_channel *channel = dev_get_drvdata (dev);
 
-  strncpy (buffer, channel -> pkt.ac.address, 8);
+  strncpy (buffer, channel -> pkt.ac.address, ADDRESS_SIZE);
   buffer[sizeof(buffer) - 1] = '\0';
 
   return sprintf (buf, "%s\n", buffer);
@@ -193,18 +198,18 @@ char buffer[5];
 
   const struct rf433_channel *channel = dev_get_drvdata (dev);
 
-  strncpy (buffer, channel -> pkt.ac.command, 4);
+  strncpy (buffer, channel -> pkt.ac.command, COMMAND_SIZE);
   buffer[sizeof(buffer) - 1] = '\0';
 
   return sprintf (buf, "%s\n", buffer);
 }
 
-static ssize_t rf433_packet_show (struct device *dev, struct device_attribute *attr, char *buf) {
+static ssize_t rf433_codeword_show (struct device *dev, struct device_attribute *attr, char *buf) {
 char buffer[13];
 
   const struct rf433_channel *channel = dev_get_drvdata (dev);
 
-  strncpy (buffer, channel -> pkt.packet, 12);
+  strncpy (buffer, channel -> pkt.codeword, ADDRESS_SIZE + COMMAND_SIZE);
   buffer[sizeof(buffer) - 1] = '\0';
 
   return sprintf (buf, "%s\n", buffer);
@@ -214,17 +219,23 @@ char buffer[13];
 //
 static ssize_t rf433_address_store (struct device *dev, struct device_attribute *attr, const char *buf, size_t size) {
 struct rf433_channel *channel = dev_get_drvdata (dev);
-char buffer[9];
+char buffer[ADDRESS_SIZE + 1];
+__u8 i;
 
-  if (mutex_is_locked (&rf433_mutex)) { // Are we in a middle of sending a command out?
+  if (mutex_is_locked (&rf433_mutex)) { // Are we in a middle of sending a frame out?
     printk(KERN_INFO "[%s] rf433 is busy\n", rf433_class.name);
     return -EBUSY;
   }
 
   // Successful sscanf?
-  if (sscanf (buf, "%8s", buffer)) {
+  if (sscanf (buf, "%s", buffer)) {
 
-    strncpy (channel -> pkt.ac.address, buffer, 8);
+    for (i = 0; i < ADDRESS_SIZE; i++) 
+      if (buffer[i] != '0' && buffer[i] != '1' && buffer[i] != 'f' && buffer[i] != 'F')
+        return -EINVAL;
+
+    // Copy chars up to ADDRESS_SIZE chars
+    strncpy (channel -> pkt.ac.address, buffer, ADDRESS_SIZE);
     return size;
   }
 
@@ -233,36 +244,47 @@ char buffer[9];
 
 static ssize_t rf433_command_store (struct device *dev, struct device_attribute *attr, const char *buf, size_t size) {
 struct rf433_channel *channel = dev_get_drvdata (dev);
-char buffer[5];
+char buffer[COMMAND_SIZE + 1];
+__u8 i;
 
-  if (mutex_is_locked (&rf433_mutex)) { // returns 1 if successful and 0 if there is contention
+  if (mutex_is_locked (&rf433_mutex)) { // busy sending a frame out?
     printk(KERN_INFO "[%s] rf433 is busy\n", rf433_class.name);
     return -EBUSY;
   }
 
   // Successful sscanf?
-  if (sscanf (buf, "%4s", buffer)) {
+  if (sscanf (buf, "%s", buffer)) {
 
-    strncpy (channel -> pkt.ac.command, buffer, 4);
+    for (i = 0; i < COMMAND_SIZE; i++) 
+      if (buffer[i] != '0' && buffer[i] != '1' && buffer[i] != 'f' && buffer[i] != 'F')
+        return -EINVAL;
+
+    // Copy chars up to COMMAND_SIZE chars
+    strncpy (channel -> pkt.ac.command, buffer, COMMAND_SIZE);
     return size;
   }
 
   return -EINVAL;
 }
 
-static ssize_t rf433_packet_store (struct device *dev, struct device_attribute *attr, const char *buf, size_t size) {
+static ssize_t rf433_codeword_store (struct device *dev, struct device_attribute *attr, const char *buf, size_t size) {
 struct rf433_channel *channel = dev_get_drvdata (dev);
-char buffer[13];
+char buffer[ADDRESS_SIZE + COMMAND_SIZE + 1];
+__u8 i;
 
-  if (mutex_is_locked (&rf433_mutex)) { // returns 1 if successful and 0 if there is contention
+  if (mutex_is_locked (&rf433_mutex)) { // busy sending a frame out?
     printk(KERN_INFO "[%s] rf433 is busy\n", rf433_class.name);
     return -EBUSY;
   }
 
   // Successful sscanf?
-  if (sscanf (buf, "%12s", buffer)) {
+  if (sscanf (buf, "%s", buffer)) {
 
-    strncpy (channel -> pkt.packet, buffer, 12);
+    for (i = 0; i < ADDRESS_SIZE + COMMAND_SIZE; i++) 
+      if (buffer[i] != '0' && buffer[i] != '1' && buffer[i] != 'f' && buffer[i] != 'F')
+        return -EINVAL;
+
+    strncpy (channel -> pkt.codeword, buffer, ADDRESS_SIZE + COMMAND_SIZE);
     return size;
   }
 
@@ -305,13 +327,13 @@ __u32 reg;
       return -EBUSY;
     }
 
-    // process the packet
-    strncpy (buffer, channel -> pkt.packet, 12);
+    // process the codeword
+    strncpy (buffer, channel -> pkt.codeword, ADDRESS_SIZE + COMMAND_SIZE);
     buffer[sizeof(buffer) - 1] = '\0';
 
     printk(KERN_INFO "[%s] Sending [%s]\n", rf433_class.name, buffer);
 
-    for (i = 0; i < 12; i++) {
+    for (i = 0; i < ADDRESS_SIZE + COMMAND_SIZE; i++) {
 
       j = 0;
       switch (buffer[i]) {
@@ -337,7 +359,7 @@ __u32 reg;
       }
     }
 
-    // Finish the packet with sync bit (first half; narrow interval)
+    // Finish the codeword with sync bit (first half; narrow interval)
     channel -> bitstring[48] = 0;
 
     if (action > 0) {
@@ -348,13 +370,13 @@ __u32 reg;
       hr_timer.function = &waveform_hrtimer_callback;
 
       if (action == 1) 
-        channel -> packets = NORMAL_PACKETS;
+        channel -> codewords = NORMAL_CODEFRAME;
       
-      // "Infinite" number of packets (continuous send). Useful for re-sync of outlets
+      // "Endless" number of codewords (continuous send). Useful for programming of controlled devices
       if (action == 2)
-        channel -> packets = MAX_PACKETS;
+        channel -> codewords = ENDLESS_CODEFRAME;
 
-      channel -> waveformpart = 0;
+      channel -> codebits = 0;
 
       // Set out bit high 
       reg = ioread32 (channel -> datareg);
@@ -363,7 +385,7 @@ __u32 reg;
 
       hrtimer_start (&hr_timer, ktime, HRTIMER_MODE_REL);
 
-      // printk(KERN_INFO "[%s] [part #%d]: %d\n", rf433_class.name, channel -> waveformpart, channel -> bitstring[channel -> waveformpart]);
+      // printk(KERN_INFO "[%s] [part #%d]: %d\n", rf433_class.name, channel -> codebits, channel -> bitstring[channel -> codebits]);
 
       return size;
     }
@@ -382,14 +404,14 @@ __u32 reg;
   reg ^= (1 << 0x06);
   iowrite32 (reg, channel.datareg);
 
-  channel.waveformpart++;
+  channel.codebits++;
 
-  if (channel.waveformpart > sizeof (channel.bitstring)) {
+  if (channel.codebits > sizeof (channel.bitstring)) {
 
-    channel.packets--;
+    channel.codewords--;
 
-    // Frame is completed
-    if (!channel.packets) {
+    // Code frame is completed
+    if (!channel.codewords) {
 
       // Turn the radio off
       reg = ioread32 (channel.datareg);
@@ -404,7 +426,7 @@ __u32 reg;
       return HRTIMER_NORESTART;
     }
 
-    channel.waveformpart = 0;
+    channel.codebits = 0;
 
     // Set out bit high 
     reg = ioread32 (channel.datareg);
@@ -416,20 +438,20 @@ __u32 reg;
     return HRTIMER_RESTART;
   }
   else
-  if (channel.waveformpart == sizeof (channel.bitstring)) {
+  if (channel.codebits == sizeof (channel.bitstring)) {
 
     // send sync bit
     hrtimer_forward (timer, ktime_get (), ktime_set (0, SYNC));
 
-    // printk(KERN_INFO "[%s] [part #%d]: %d\n", rf433_class.name, channel.waveformpart, 0);
+    // printk(KERN_INFO "[%s] [part #%d]: %d\n", rf433_class.name, channel.codebits, 0);
 
     return HRTIMER_RESTART;
   }
   else {
 
-    hrtimer_forward (timer, ktime_get (), ktime_set (0, INTERVAL(channel.bitstring[channel.waveformpart])));
+    hrtimer_forward (timer, ktime_get (), ktime_set (0, INTERVAL(channel.bitstring[channel.codebits])));
 
-    // printk(KERN_INFO "[%s] [part #%d]: %d\n", rf433_class.name, channel.waveformpart, channel.bitstring[channel.waveformpart]);
+    // printk(KERN_INFO "[%s] [part #%d]: %d\n", rf433_class.name, channel.codebits, channel.bitstring[channel.codebits]);
 
     return HRTIMER_RESTART;
   }
