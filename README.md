@@ -19,7 +19,7 @@ After the module loads:
 
 <pre>
 > cd /sys/class/rf433/rf0
-> echo "00f0fff10001" > packet  # Send command "0001" to address "00f0fff1"
+> echo "00f0fff10001" > packet  # Send command "01" ("ON") to address "00f0fff100"
 > echo 1 > send
 </pre>
 
