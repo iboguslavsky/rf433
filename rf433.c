@@ -36,11 +36,11 @@ static struct class rf433_class = {
   .class_attrs =  rf433_class_attrs,
 };
 
-// Number of code words in a code frame in the frame
+// Number of code words in a code frame
 #define NORMAL_CODEFRAME 10 
 #define ENDLESS_CODEFRAME 65535 
 
-// Etekcity icodeword cosists of 10-bit addresses and 2-bit commands
+// Etekcity code word: 10-bit addresses and 2-bit commands
 #define ADDRESS_SIZE 10
 #define COMMAND_SIZE 2
 
@@ -61,7 +61,7 @@ struct rf433_channel {
 
   __u8  bitstring[49]; // 12 bits * 4 transitions each + 1 stop bit (narrow) transition; will turn into real bit string at some point
   __u8  codebits;      // current code bit in a code word
-  __u16 codewords;     // current codeword in a codeframe
+  __u16 codewords;     // current code word in a code frame
 
   __u32 ctrl_reg, pullup_reg;
 
@@ -69,7 +69,7 @@ struct rf433_channel {
 };
 
 
-// Transition width nanoseconds
+// Transition width in nanoseconds
 #define NARROW 180000
 #define WIDE (3 * NARROW)
 #define SYNC (30 * NARROW)
@@ -131,7 +131,7 @@ void __iomem *addr;
   addr = ioremap (PG_CFG0_REG, 4);
   data = ioread32 (addr);
   
-  // Store PINs configuration for the exit
+  // Store PINs configuration for future restore
   channel.ctrl_reg = data;
   data &= ~(1 << 26);     
   data &= ~(1 << 25);
