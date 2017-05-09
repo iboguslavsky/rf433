@@ -19,11 +19,17 @@ After the module loads:
 
 <pre>
 > cd /sys/class/rf433/rf0
-> echo "00f0fff10001" > packet  # Send command "01" ("ON") to address "00f0fff100"
-> echo 1 > send
+> echo "00f0fff10001" > codeword  # Send command "01" ("ON") to address "00f0fff100"
+> echo "1" > send
 </pre>
 
-You can supply the address and command separately via ./address and ./command files in the same directory.
+Alternatively, you can supply address and command separately:
+<pre>
+> cd /sys/class/rf433/rf0
+> echo "00f0fff100" > address  # Set address to "00f0fff100"
+> echo "01" > command          # Send command "01" ("ON") to address "00f0fff100"
+> echo "1" > send
+</pre>
 
 Trasmitter used: RCT-433-UTR (Mouser P/N: 509-RCT-433-UTR):
 
